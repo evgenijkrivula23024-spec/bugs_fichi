@@ -1,4 +1,4 @@
-migrate_mysql_to_ch_universal.py c переменными окружения. просто создай .env и заполни
+# migrate_mysql_to_ch_universal.py c переменными окружения. просто создай .env и заполни
 # Пример конфигурации для миграции MySQL → ClickHouse
 # Скопируйте в .env и заполните своими значениями.
 
@@ -15,3 +15,6 @@ CH_PORT=8123
 CH_USER=default
 CH_PASSWORD=
 CH_DATABASE=default
+# команда запуска
+# $env:PYTHONIOENCODING='utf-8'
+# python migrate_mysql_to_ch_universal.py --all

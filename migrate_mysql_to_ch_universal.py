@@ -23,6 +23,7 @@ import json
 import time
 import urllib.request
 import urllib.error
+import argparse
 from pathlib import Path
 from typing import Optional
 
@@ -200,17 +201,28 @@ def build_clickhouse_ddl(table: str, columns: list) -> str:
 
 def ch_query(sql: str, body: Optional[bytes] = None, timeout: int = 300) -> tuple:
     """Выполняет запрос к ClickHouse по HTTP."""
-    url = f"http://{CH_HOST}:{CH_PORT}/?database={CH_DATABASE}"
+    import urllib.parse
+    
+    # Формируем URL с параметрами аутентификации только если пароль указан
+    # Если пароль пустой, не отправляем параметры user/password (подключение без аутентификации)
+    url_params = {"database": CH_DATABASE}
+    if CH_PASSWORD and CH_PASSWORD.strip():
+        # Только если пароль не пустой, добавляем параметры аутентификации
+        if CH_USER:
+            url_params["user"] = CH_USER
+        url_params["password"] = CH_PASSWORD
+    
+    url = f"http://{CH_HOST}:{CH_PORT}/?{urllib.parse.urlencode(url_params)}"
     data = body if body is not None else sql.encode("utf-8")
+    headers = {
+        "Content-Type": "text/plain; charset=utf-8",
+    }
+    
     req = urllib.request.Request(
         url,
         data=data,
         method="POST",
-        headers={
-            "Content-Type": "text/plain; charset=utf-8",
-            "X-ClickHouse-User": CH_USER,
-            "X-ClickHouse-Key": CH_PASSWORD or "",
-        },
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -387,8 +399,26 @@ def main():
     print(f"Найдено таблиц в MySQL: {len(tables)}\n")
     for i, t in enumerate(tables, 1):
         print(f"  {i}. {t}")
-    print("\nВведите номера таблиц через пробел (например: 1 3 5) или 'all' для всех:")
-    choice = input("> ").strip().lower()
+    
+    # Поддержка аргументов командной строки
+    parser = argparse.ArgumentParser(description='Миграция MySQL → ClickHouse')
+    parser.add_argument('--tables', type=str, help='Номера таблиц через пробел или "all" для всех')
+    parser.add_argument('--all', action='store_true', help='Мигрировать все таблицы')
+    args, unknown = parser.parse_known_args()
+    
+    if args.all or (args.tables and args.tables.lower() == 'all'):
+        choice = "all"
+    elif args.tables:
+        choice = args.tables
+    else:
+        print("\nВведите номера таблиц через пробел (например: 1 3 5) или 'all' для всех:")
+        try:
+            choice = input("> ").strip().lower()
+        except EOFError:
+            print("Интерактивный ввод недоступен. Используйте --all или --tables")
+            mysql_conn.close()
+            return
+    
     if not choice:
         print("Ничего не выбрано. Выход.")
         mysql_conn.close()
@@ -475,8 +505,15 @@ def main():
 
     if to_reload:
         print(f"\nТаблицы для перезагрузки (отсутствуют или неполные): {', '.join(to_reload)}")
-        print("Перезагрузить их сейчас? (y/n):")
-        if input("> ").strip().lower() == "y":
+        if args.all or (args.tables and args.tables.lower() == 'all'):
+            reload_choice = "y"
+        else:
+            print("Перезагрузить их сейчас? (y/n):")
+            try:
+                reload_choice = input("> ").strip().lower()
+            except EOFError:
+                reload_choice = "n"
+        if reload_choice == "y":
             mysql_conn = mysql.connector.connect(
                 host=DB_HOST, port=DB_PORT, user=DB_USER,
                 password=DB_PASSWORD, database=DB_NAME, use_pure=True,
